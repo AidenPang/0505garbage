@@ -199,7 +199,21 @@
 
         // 拍照並識別 (針對 Video 標籤)
         captureBtn.addEventListener('click', () => {
-            classifyImage(cameraVideo);
+            // 建立 Canvas 來擷取當下畫面
+            const canvas = document.createElement('canvas');
+            canvas.width = cameraVideo.videoWidth;
+            canvas.height = cameraVideo.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(cameraVideo, 0, 0, canvas.width, canvas.height);
+            
+            // 將 Canvas 轉換為圖片並顯示
+            imagePreview.src = canvas.toDataURL('image/png');
+            imagePreview.style.display = 'block';
+            cameraVideo.style.display = 'none';
+            captureBtn.style.display = 'none';
+            
+            stopCamera(); // 關閉相機串流
+            classifyImage(imagePreview); // 針對拍下來的照片進行識別
         });
 
         // 4. 核心功能：進行影像分類識別
