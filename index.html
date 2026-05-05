@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 物品識別 Web App</title>
+    <!-- 引入 TensorFlow.js 核心與 Teachable Machine 圖像模型庫 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        button, label.upload-btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover, label.upload-btn:hover {
+            background-color: #0056b3;
+        }
+        button:disabled, label.upload-btn[disabled] {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .media-container {
+            margin-top: 20px;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #eaeaea;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        img, video {
+            max-width: 100%;
+            max-height: 400px;
+            display: none;
+        }
+        #result {
+            margin-top: 20px;
+            text-align: left;
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .prediction {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🔍 AI 物品識別</h1>
+        <p id="status">正在載入 AI 模型，請稍候...</p>
+        
+        <div class="controls">
+            <!-- 上傳照片按鈕 -->
+            <label class="upload-btn" id="uploadLabel" disabled>
+                上傳照片
+                <input type="file" id="uploadInput" accept="image/*" disabled>
+            </label>
+            <!-- 開啟相機按鈕 -->
+            <button id="cameraBtn" disabled>開啟相機</button>
+            <button id="captureBtn" style="display:none; background-color: #28a745;">拍照並識別</button>
+        </div>
+
+        <div class="media-container">
+            <img id="imagePreview" src="" alt="圖片預覽" crossorigin="anonymous">
+            <video id="cameraVideo" autoplay playsinline></video>
+        </div>
+        
+        <div id="result">
+            <div style="text-align: center; color: #666;">識別結果將顯示於此處</div>
+        </div>
+    </div>
+
+    <script>
+        let model;
+        const statusEl = document.getElementById('status');
+        const uploadInput = document.getElementById('uploadInput');
+        const uploadLabel = document.getElementById('uploadLabel');
+        const cameraBtn = document.getElementById('cameraBtn');
+        const captureBtn = document.getElementById('captureBtn');
+        const imagePreview = document.getElementById('imagePreview');
+        const cameraVideo = document.getElementById('cameraVideo');
+        const resultEl = document.getElementById('result');
+        let currentStream = null;
+
+        // 1. 初始化並載入自定義模型
+        async function loadModel() {
+            const URL = "./model/";
+            const modelURL = URL + "model.json";
+            
+            // 直接將 metadata 寫死在程式碼中，避免讀取檔案時發生網路或路徑錯誤
+            const customMetadata = {
+                "tfjsVersion": "1.7.4",
+                "tmVersion": "2.4.14",
+                "packageVersion": "0.8.4-alpha2",
+                "packageName": "@teachablemachine/image",
+                "timeStamp": "2026-05-05T06:28:50.840Z",
+                "userMetadata": {},
+                "modelName": "tm-my-image-model",
+                "labels": ["shoes","plastic","paper","metal","glass","clothes","cardboard","biological","battery"],
+                "imageSize": 224
+            };
+            try {
+                model = await tmImage.load(modelURL, customMetadata);
+                statusEl.innerText = '✅ 模型載入完成！請上傳照片或開啟相機。';
+                statusEl.style.color = 'green';
+                
+                // 啟用按鈕
+                uploadInput.disabled = false;
+                uploadLabel.removeAttribute('disabled');
+                cameraBtn.disabled = false;
+            } catch (error) {
+                statusEl.innerText = '❌ 模型載入失敗，請檢查網路連線。';
+                statusEl.style.color = 'red';
+                console.error(error);
+            }
+        }
+
+        // 2. 處理照片上傳
+        uploadInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                stopCamera(); // 關閉相機（如果正在使用）
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreview.style.display = 'block';
+                    cameraVideo.style.display = 'none';
+                    captureBtn.style.display = 'none';
+                    
+                    // 當圖片載入完成後進行識別
+                    imagePreview.onload = () => classifyImage(imagePreview);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 3. 處理相機功能
+        cameraBtn.addEventListener('click', async () => {
+            try {
+                // 要求後置鏡頭 (environment)
+                currentStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                cameraVideo.srcObject = currentStream;
+                cameraVideo.style.display = 'block';
+                imagePreview.style.display = 'none';
+                captureBtn.style.display = 'inline-block';
+                resultEl.innerHTML = '<div style="text-align: center; color: #666;">請對準物品後點擊「拍照並識別」</div>';
+            } catch (err) {
+                alert('無法存取相機，請確認已授權瀏覽器使用相機：' + err.message);
+            }
+        });
+
+        // 停止相機串流
+        function stopCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+        }
+
+        // 拍照並識別 (針對 Video 標籤)
+        captureBtn.addEventListener('click', () => {
+            classifyImage(cameraVideo);
+        });
+
+        // 4. 核心功能：進行影像分類識別
+        async function classifyImage(element) {
+            resultEl.innerHTML = '<div style="text-align: center;">🔄 正在分析影像...</div>';
+            try {
+                // 呼叫模型進行識別
+                const predictions = await model.predict(element);
+                
+                // 依照機率由高到低排序
+                predictions.sort((a, b) => b.probability - a.probability);
+                
+                // 渲染結果
+                let resultHTML = '<h3>識別結果：</h3>';
+                predictions.slice(0, 3).forEach(p => { // 只顯示最高機率的前 3 名
+                    // 將機率轉換為百分比
+                    const probability = (p.probability * 100).toFixed(2);
+                    
+                    resultHTML += `
+                        <div class="prediction">
+                            <span><strong>${p.className}</strong></span>
+                            <span>機率: ${probability}%</span>
+                        </div>
+                    `;
+                });
+                resultEl.innerHTML = resultHTML;
+            } catch (err) {
+                resultEl.innerHTML = '<div style="text-align: center; color: red;">識別失敗，請再試一次。</div>';
+                console.error(err);
+            }
+        }
+
+        // 網頁載入時啟動模型
+        window.onload = loadModel;
+    </script>
+</body>
+</html>
