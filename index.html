@@ -206,6 +206,11 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(cameraVideo, 0, 0, canvas.width, canvas.height);
             
+            // 設定必須等圖片載入完成後，再進行識別
+            imagePreview.onload = () => {
+                classifyImage(imagePreview);
+            };
+            
             // 將 Canvas 轉換為圖片並顯示
             imagePreview.src = canvas.toDataURL('image/png');
             imagePreview.style.display = 'block';
@@ -213,7 +218,6 @@
             captureBtn.style.display = 'none';
             
             stopCamera(); // 關閉相機串流
-            classifyImage(imagePreview); // 針對拍下來的照片進行識別
         });
 
         // 4. 核心功能：進行影像分類識別
